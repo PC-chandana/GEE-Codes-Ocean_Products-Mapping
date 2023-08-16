@@ -1,0 +1,150 @@
+
+var Sent = s2.filterDate('2021-07-07','2021-07-09')
+             .filterBounds(roi); 
+
+Sent = Sent.map(function(img){ 
+var scl = img.select('SCL');
+///selecting cloud shadow, cloud masks and water
+var cloud_shadow = scl.eq(3);
+var cloud_low = scl.eq(7);
+var cloud_medium = scl.eq(8);
+var cloud_high = scl.eq(9);
+var water = scl.eq(6);
+///Merging those
+var masks = cloud_shadow.add(cloud_low).add(cloud_medium).add(cloud_high).add(water)
+var masks_uni = masks.eq(0).selfMask()
+var final_img = img.updateMask(masks_uni);
+return final_img
+})
+
+
+Sent = Sent.map(function(img){
+    // NDVI
+  var ndvi = img.normalizedDifference(['B8','B4']).rename('NDVI');
+  // NDMI (Normalized Difference Mangrove Index - Shi et al 2016 - New spectral metrics for mangrove forest identification)
+  var ndmi = img.normalizedDifference(['B12','B3']).rename('NDMI');
+  // MNDWI (Modified Normalized Difference Water Index - Hanqiu Xu, 2006)
+  var mndwi = img.normalizedDifference(['B3','B11']).rename('MNDWI');
+  // SR (Simple Ratio)
+  var sr = img.select('B8').divide(img.select('B4')).rename('SR');
+  // Band Ratio 54
+  var ratio54 = img.select('B11').divide(img.select('B8')).rename('R54');
+  // Band Ratio 35
+  var ratio35 = img.select('B4').divide(img.select('B11')).rename('R35');
+  // GCVI
+  var gcvi = img.expression('(NIR/GREEN)-1',{
+    'NIR':img.select('B8'),
+    'GREEN':img.select('B3')
+  }).rename('GCVI');
+  
+  return img
+    .addBands(ndvi)
+    .addBands(ndmi)
+    .addBands(mndwi)
+    .addBands(sr)
+    .addBands(ratio54)
+    .addBands(ratio35)
+    .addBands(gcvi);
+})
+
+
+Sent = Sent.filterDate('2021-07-07','2021-07-09').mean().clip(roi);
+
+// Clip SRTM data to region
+var srtmClip = SRTM.clip(roi);
+
+//Mask to elevations less than 65 meters
+var elevationMask = srtmClip.lt(65);
+
+//Used the NDVI and MNDWI bands to create masks
+var NDVIMask = Sent.select('NDVI').gt(0.25);
+var MNDWIMask = Sent.select('MNDWI').gt(-0.50);
+
+//Apply the masks
+var Sent_Coastal = Sent.updateMask(NDVIMask)
+                       .updateMask(MNDWIMask)
+                       .updateMask(elevationMask)
+
+Map.addLayer(Sent,{min:0.0,max:3000,bands:['B8','B4','B3']},'Sentinel RGB Cloud and Water Masked')
+Map.addLayer(Sent_Coastal,{min:0.0,max:3000,bands:['B4','B3','B2']},'Sentinel Coastal Masked')
+Map.addLayer(Sent_Coastal,{min:0.0,max:3000,bands:['B8','B11','B4']},'Sentinel (Band 8,11,4) Coastal Masked')
+
+//3.1) Prepare training data and predictors
+////////////////////////////////////////////
+
+//After drawing training polygons, merge them together
+var classes = Mangrove.merge(NonMangrove)
+
+//Define the bands you want to include in the model
+var bands = ['B5','B6','B4','NDVI','MNDWI','SR','GCVI']
+
+var image = Sent_Coastal.select(bands)
+   
+//Assemble samples for the model
+var samples = image.sampleRegions({
+    collection: classes, // Set of geometries selected for training
+    properties: ['LULC'], // Label from each geometry
+    scale: 10 // Make each sample the same size as Landsat pixel
+    }).randomColumn('random'); // creates a column with random numbers
+    
+//Here we randomly split our samples to set some aside for testing our model's accuracy
+// using the "random" column we created
+var split = 0.8; // Roughly 80% for training, 20% for testing.
+var training = samples.filter(ee.Filter.lt('random', split)); //Subset training data
+var testing = samples.filter(ee.Filter.gte('random', split)); //Subset testing data
+
+//Print these variables to see how much training and testing data you are using
+    print('Samples n =', samples.aggregate_count('.all'));
+    print('Training n =', training.aggregate_count('.all'));
+    print('Testing n =', testing.aggregate_count('.all'));
+
+//3.2) Begin Random Forest Classification
+/////////////////////////////////////////
+
+//.smileRandomForest is used to run the model. Here we run the model using 100 trees
+// and 5 randomly selected predictors per split ("(100,5)")
+    var classifier = ee.Classifier.smileRandomForest(100,5).train({ 
+    features: training.select(['B5','B6','B4','NDVI','MNDWI','SR','GCVI', 'LULC']), //Train using bands and landcover property
+    classProperty: 'LULC', //Pull the landcover property from classes
+    inputProperties: bands
+    });
+
+//3.3) Test the accuracy of the model
+//////////////////////////////////////
+
+    var validation = testing.classify(classifier);
+    var testAccuracy = validation.errorMatrix('LULC', 'classification');
+    print('Validation error matrix RF: ', testAccuracy);
+    print('Validation overall accuracy RF: ', testAccuracy.accuracy());
+
+//3.4) Classify the Landsat composite using the Random Forest model
+///////////////////////////////////////////////////////////////////
+
+    var classifiedrf = image.select(bands) // select the predictors
+                      .classify(classifier); // .classify applies the Random Forest
+                      
+//The model results may be "noisy". To reduce noise, create a mask to mask
+// unconnected pixels
+    var pixelcount = classifiedrf.connectedPixelCount(100, false); //Create an image that shows the number of pixels each pixel is connected to
+    var countmask = pixelcount.select(0).gt(25); //filter out all pixels connected to 4 or less 
+
+//Mask the results to only display mangrove extent
+    var classMask = classifiedrf.select('classification').gt(1)
+    var classed= classifiedrf.updateMask(countmask).updateMask(classMask)
+    
+//3.5) Map results
+////////////////////
+
+//Add classification to map
+Map.addLayer (classed, {min: 1, max: 1, palette:'blue'}, 'Mangrove');
+
+Export.image.toDrive({
+  image:classed,
+  description:'Mangrove', 
+  folder:'Mangrove-GAIT', 
+  fileNamePrefix:'2021_07_08_Mangroove', 
+  region:roi, 
+  scale:10, 
+  crs:'EPSG:4326', 
+  fileFormat:'Geotiff',
+})

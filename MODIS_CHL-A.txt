@@ -1,0 +1,76 @@
+// Define a region of interest - will be used to determine data range.
+//var aoi = ee.Geometry.Polygon(
+  //[[[-61.172734375000005, -41.60272876097877],
+   // [-61.172734375000005, -53.82304493739765],
+    //[-40.342656250000005, -53.82304493739765],
+    //[-40.342656250000005, -41.60272876097877]]], null, false);
+// Import dataset.
+var dataset_Img = ee.ImageCollection('NASA/OCEANDATA/MODIS-Aqua/L3SMI')
+  // Filter dates.
+  .filterDate('2016-01-01', '2016-01-31')
+var dataset = dataset_Img.mean().multiply(0.0016).log10();
+var geometry = ind_coast.geometry();
+var dataset_clp = dataset.clip(geometry);
+
+
+  // Mosaic all images in the collection (could use .mean() or .median())
+ // .mosaic()
+  // Select only the two bands of interest.
+  //.select(['chlor_a', 'sst']);
+
+// Calculate the range of 2nd to 98th percentile to bound data for visualization.
+// Statistics are calculated only within the region of interest.
+var range = dataset.reduceRegion({
+  reducer: ee.Reducer.percentile({
+    percentiles: [2, 98],
+    outputNames: ['p2', 'p98']}),
+  geometry: ind_coast,
+  scale: 10000});
+print('Value range:', range);
+
+// Make a function that scales the data between the 2nd to 98th percentiles to
+// the 8-bit range (0 to 255) for visualization.
+function scaleVis(img, min, max) {
+  min = ee.Image.constant(min);
+  max = ee.Image.constant(max);
+  return img
+    .subtract(min)
+    .divide(max.subtract(min))
+    .multiply(255)
+    .round()
+    .toByte();
+}
+
+// Select and apply the visualization function to the 'chlor_a' data.
+var chlor_a = dataset.select('chlor_a');
+var chlor_aVis = scaleVis(
+  chlor_a, range.get('chlor_a_p2'), range.get('chlor_a_p98'));
+
+// Select and apply the visualization function to the 'sst' data.
+//var sst = dataset.select('sst');  
+//var sstVis = scaleVis(
+ // sst, range.get('sst_p2'), range.get('sst_p98'));
+
+// Make a blank image with all values set at 0.
+var blank = ee.Image.constant(0).toByte();
+
+// Make an RGB visualization image, where red represents chlor_a,
+// green is set to no representation (blank image), and blue represents
+// sst.
+//var vis = ee.image.(chlor_aVis);
+var vis = {
+  bands: ['chlor_a'],
+  min: -2,
+  max: 2,
+  palette: [
+    '3500a8','0800ba','003fd6',
+    '00aca9','77f800','ff8800',
+    'b30000','920000','880000'
+  ]
+};
+// Display the original data and the visualization data to the map.
+// Use the Inspector tab and click to explorer actual values for different
+// regions of color.
+//Map.setCenter(-52.12, -46.13, 4);
+//Map.addLayer(dataset, 'dataset_Img');
+Map.addLayer(dataset_clp,vis, 'Visualization');

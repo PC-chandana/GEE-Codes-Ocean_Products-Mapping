@@ -1,0 +1,102 @@
+//Chlorophyll-a image data from 1 Jan - 31 De 2020 from Global Change Observation Mission (GCOM)
+//JAXA
+/* Data CitatioN: Murakami, H. (Jan. 2020). ATBD of GCOM-C chlorophyll-a 
+   concentration algorithm (Version 2). Retrieved from 
+  https://suzaku.eorc.jaxa.jp/GCOM_C/data/ATBD/ver2/V2ATBD_O3AB_Chla_Murakami.pdf
+*/
+var GCOM_Img = imageCollection.filter(ee.Filter.date('2022-01-01', '2022-01-31'));
+var GCOM = GCOM_Img.mean().multiply(0.0016).log10();
+var geometry = PalkStrait.geometry();
+var GCOM_clp = GCOM.clip(PalkStrait);
+print(GCOM_Img)
+//Chart titles
+var title = {
+  title: 'Chlorophyll-a Concentration',
+  hAxis: {title: 'Time'},
+  vAxis: {title: 'mg/m^3'},
+};
+
+//Bar chart with CHLA (Chlorophyll-A) & CHLA_QA Flag
+var chart = ui.Chart.image.series
+(GCOM_Img,geometry, ee.Reducer.mean(), 4639,'system:time_start')
+    .setOptions(title)
+    .setChartType('ColumnChart');
+print('Chlorophyll-a Concentration from 1 Jan - 31 Dec 2020');
+print(chart);
+
+var vis = {
+  bands: ['CHLA_AVE'],
+  min: -2,
+  max: 2,
+  palette: [
+    '3500a8','0800ba','003fd6',
+    '00aca9','77f800','ff8800',
+    'b30000','920000','880000'
+  ]
+};
+
+Map.addLayer(GCOM_clp, vis, "Chl_a conc")
+
+var dataset = ee.ImageCollection("JAXA/GCOM-C/L3/OCEAN/SST/V3")
+                .filterDate('2022-1-01', '2022-01-31')
+                // filter to daytime data only
+                .filter(ee.Filter.eq("SATELLITE_DIRECTION", "D"))
+                .filter(ee.Filter.bounds(PalkStrait));
+
+
+// Multiply with slope coefficient and add offset
+var Apr2022 = dataset.mean().multiply(0.0012).add(-10);
+
+var vis = {
+  bands: ['SST_AVE'],
+  min: 0,
+  max: 30,
+  palette: ['000000', '005aff', '43c8c8', 'fff700', 'ff0000'],
+};
+Map.addLayer(Apr2022.clip(PalkStrait), vis, "Sea Surface Temperature");
+
+//Export mean Chlorophyll-a (two bands)images to GoogleDrive
+// Export.image.toDrive({
+//   image: GCOM_clp,
+//   description: 'GCOM_ChlorA',
+//   region: geometry,
+//   scale: 4639,
+//   crs:'epsg:4326',
+//   maxPixels:4e10,
+// });
+// var image3 = ee.Algorithms.CrossCorrelation(GCOM_clp,Apr2022.clip(PalkStrait),2,5,0)
+// Map.addLayer(image3)
+// print(image3)
+var merged = GCOM_clp.addBands(Apr2022.clip(PalkStrait))
+Map.addLayer(merged)
+
+// // set the dates
+// var startDate = ee.Date.fromYMD(2018,1,1);
+// var endDate = ee.Date.fromYMD(2019,1,1);
+ 
+// // getting modis Land Surface Temperature
+// var temperature = ee.ImageCollection("MODIS/006/MOD11A2")
+//   .filterDate(startDate, endDate)
+//   .select('LST_Day_1km')
+//   .mean()
+//   .multiply(0.02)
+//   .subtract(273.15)
+//   .rename('temp');
+ 
+// // get the Digital Elevation Model
+// var dem = ee.Image('CGIAR/SRTM90_V4').rename('elevation');
+ 
+// // combine two images
+// var img = dem.addBands(temperature);
+ 
+// sample N points from the 2-band image
+var values = merged.sample({ region: PalkStrait, scale: 500, numPixels: 1000, geometries: true}) 
+ 
+Map.addLayer(values.style({ color: 'red', pointSize: 2 }), {}, 'samples')
+ 
+// plot sampled features as a scatter chart
+var chart = ui.Chart.feature.byFeature(values, 'elevation', ['temp'])
+  .setChartType('ScatterChart')
+  .setOptions({ pointSize: 2, pointColor: 'red', width: 300, height: 300, titleX: 'Elevation (m)', titleY: 'Temperature (C)' })
+   
+print(chart)

@@ -1,0 +1,224 @@
+var startDateWinter = ee.Date("2001-12");
+var endDateWinter = ee.Date("2002-02-28");
+
+var startDatePremon = ee.Date("2002-03");
+var endDatePremon = ee.Date("2002-05-31");
+
+var startDatemon = ee.Date("2002-06");
+var endDatemon = ee.Date("2002-09-30");
+
+var startDatePostmon = ee.Date("2002-10");
+var endDatePostmon = ee.Date("2002-11-30");
+
+var years = ee.List.sequence(1,21)
+
+var dataset = ee.ImageCollection('NASA/OCEANDATA/MODIS-Aqua/L3SMI')
+              .select(['chlor_a', 'sst', 'poc']);
+
+var features = ee.FeatureCollection(years.map(function(year){
+
+var datasetWinter = dataset.filterDate(startDateWinter.advance(year,'year'),endDateWinter.advance(year,'year')).mean()
+
+var reducer = ee.Reducer.mean().combine({
+  reducer2: ee.Reducer.stdDev(),
+  sharedInputs: true
+});
+var multiStats = datasetWinter.reduceRegion({
+  reducer: reducer,
+  geometry: aoi,
+  scale: 4600,
+  crs: 'EPSG:32643',
+});
+
+var reducer1 = ee.Reducer.min().combine({
+  reducer2: ee.Reducer.max(),
+  sharedInputs: true
+});
+var multiStats1 = datasetWinter.reduceRegion({
+  reducer: reducer1,
+  geometry: aoi,
+  scale: 4600,
+  crs: 'EPSG:32643',
+});
+
+var samples = datasetWinter.sample({
+  region: aoi,
+  geometries: true,
+  scale: 4600, 
+});
+
+// Call reducer correctly:
+var correl = ee.Reducer.pearsonsCorrelation();
+
+// Then choose two properties to see the correlation:
+var reduced = samples.reduceColumns(correl, ['chlor_a', 'sst'])
+var reduced1 = samples.reduceColumns(correl, ['chlor_a', 'poc'])
+
+var feature = ee.Feature(null,{Date:startDateWinter.advance(year,'year'),Year:year,min_chla:multiStats1.get('chlor_a_min'),
+                         max_chla:multiStats1.get('chlor_a_max'),min_poc:multiStats1.get('poc_min'),
+                         max_poc:multiStats1.get('poc_max'), min_sst:multiStats1.get('sst_min'),
+                         max_sst:multiStats1.get('sst_max'),mean_chla:multiStats.get('chlor_a_mean'),
+                         std_chla:multiStats.get('chlor_a_stdDev'),mean_poc:multiStats.get('poc_mean'),
+                         std_poc:multiStats.get('poc_stdDev'), mean_sst:multiStats.get('sst_mean'),
+                         std_sst:multiStats.get('sst_stdDev'),corr_chlaVSsst:reduced.get('correlation'),
+                         p_val_chlaVSsst:reduced.get('p-value'),corr_chlaVSpoc:reduced1.get('correlation'),
+                         p_val_chlaVSpoc:reduced1.get('p-value')})
+
+// var datasetpre = dataset
+//   .filterDate(startDatePremon.advance(year,'year'),endDatePremon.advance(year,'year')).mean()
+  
+// var reducerpre = ee.Reducer.mean().combine({
+//   reducer2: ee.Reducer.stdDev(),
+//   sharedInputs: true
+// });
+// var multiStatspre = datasetpre.reduceRegion({
+//   reducer: reducerpre,
+//   geometry: aoi,
+//   scale: 4600,
+//   crs: 'EPSG:32643',
+// });
+
+// var reducer1pre = ee.Reducer.min().combine({
+//   reducer2: ee.Reducer.max(),
+//   sharedInputs: true
+// });
+// var multiStats1pre = datasetpre.reduceRegion({
+//   reducer: reducer1pre,
+//   geometry: aoi,
+//   scale: 4600,
+//   crs: 'EPSG:32643',
+// });
+
+// var samplespre = datasetpre.sample({
+//   region: aoi,
+//   geometries: true,
+//   scale: 4600, 
+// });
+
+// // Call reducer correctly:
+// var correlpre = ee.Reducer.pearsonsCorrelation();
+
+// // Then choose two properties to see the correlation:
+// var reducedpre = samplespre.reduceColumns(correl, ['chlor_a', 'sst'])
+// var reduced1pre = samplespre.reduceColumns(correl, ['chlor_a', 'poc'])
+
+// var featurepre = ee.Feature(null,{Date:startDatePremon.advance(year,'year'),Year:year,min_chla:multiStats1pre.get('chlor_a_min'),
+//                         max_chla:multiStats1pre.get('chlor_a_max'),min_poc:multiStats1pre.get('poc_min'),
+//                         max_poc:multiStats1pre.get('poc_max'), min_sst:multiStats1pre.get('sst_min'),
+//                         max_sst:multiStats1pre.get('sst_max'),mean_chla:multiStatspre.get('chlor_a_mean'),
+//                         std_chla:multiStatspre.get('chlor_a_stdDev'),mean_poc:multiStatspre.get('poc_mean'),
+//                         std_poc:multiStatspre.get('poc_stdDev'), mean_sst:multiStatspre.get('sst_mean'),
+//                         std_sst:multiStatspre.get('sst_stdDev'),corr_chlaVSsst:reducedpre.get('correlation'),
+//                         p_val_chlaVSsst:reducedpre.get('p-value'),corr_chlaVSpoc:reduced1pre.get('correlation'),
+//                         p_val_chlaVSpoc:reduced1pre.get('p-value')})
+
+// var datasetmon = dataset
+//   .filterDate(startDatemon.advance(year,'year'),endDatemon.advance(year,'year')).mean()
+  
+// var reducermon = ee.Reducer.mean().combine({
+//   reducer2: ee.Reducer.stdDev(),
+//   sharedInputs: true
+// });
+// var multiStatsmon = datasetmon.reduceRegion({
+//   reducer: reducermon,
+//   geometry: aoi,
+//   scale: 4600,
+//   crs: 'EPSG:32643',
+// });
+
+// var reducer1mon = ee.Reducer.min().combine({
+//   reducer2: ee.Reducer.max(),
+//   sharedInputs: true
+// });
+// var multiStats1mon = datasetmon.reduceRegion({
+//   reducer: reducer1mon,
+//   geometry: aoi,
+//   scale: 4600,
+//   crs: 'EPSG:32643',
+// });
+
+// var samplesmon = datasetmon.sample({
+//   region: aoi,
+//   geometries: true,
+//   scale: 4600, 
+// });
+
+// // Call reducer correctly:
+// var correlmon = ee.Reducer.pearsonsCorrelation();
+
+// // Then choose two properties to see the correlation:
+// var reducedmon = samplesmon.reduceColumns(correl, ['chlor_a', 'sst'])
+// var reduced1mon = samplesmon.reduceColumns(correl, ['chlor_a', 'poc'])
+
+// var featuremon = ee.Feature(null,{Date:startDatemon.advance(year,'year'),Year:year,min_chla:multiStats1mon.get('chlor_a_min'),
+//                         max_chla:multiStats1mon.get('chlor_a_max'),min_poc:multiStats1mon.get('poc_min'),
+//                         max_poc:multiStats1mon.get('poc_max'), min_sst:multiStats1mon.get('sst_min'),
+//                         max_sst:multiStats1mon.get('sst_max'),mean_chla:multiStatsmon.get('chlor_a_mean'),
+//                         std_chla:multiStatsmon.get('chlor_a_stdDev'),mean_poc:multiStatsmon.get('poc_mean'),
+//                         std_poc:multiStatsmon.get('poc_stdDev'), mean_sst:multiStatsmon.get('sst_mean'),
+//                         std_sst:multiStatsmon.get('sst_stdDev'),corr_chlaVSsst:reducedmon.get('correlation'),
+//                         p_val_chlaVSsst:reducedmon.get('p-value'),corr_chlaVSpoc:reduced1mon.get('correlation'),
+//                         p_val_chlaVSpoc:reduced1mon.get('p-value')})
+                         
+// var datasetpos = dataset
+//   .filterDate(startDatePostmon.advance(year,'year'),endDatePostmon.advance(year,'year')).mean()
+  
+// var reducerpos = ee.Reducer.mean().combine({
+//   reducer2: ee.Reducer.stdDev(),
+//   sharedInputs: true
+// });
+// var multiStatspos = datasetpos.reduceRegion({
+//   reducer: reducerpos,
+//   geometry: aoi,
+//   scale: 4600,
+//   crs: 'EPSG:32643',
+// });
+
+// var reducer1pos = ee.Reducer.min().combine({
+//   reducer2: ee.Reducer.max(),
+//   sharedInputs: true
+// });
+// var multiStats1pos = datasetpos.reduceRegion({
+//   reducer: reducer1pos,
+//   geometry: aoi,
+//   scale: 4600,
+//   crs: 'EPSG:32643',
+// });
+
+// var samplespos = datasetpos.sample({
+//   region: aoi,
+//   geometries: true,
+//   scale: 4600, 
+// });
+
+// // Call reducer correctly:
+// var correlpos = ee.Reducer.pearsonsCorrelation();
+
+// // Then choose two properties to see the correlation:
+// var reducedpos = samplespos.reduceColumns(correl, ['chlor_a', 'sst'])
+// var reduced1pos = samplespos.reduceColumns(correl, ['chlor_a', 'poc'])
+
+// var featurepos = ee.Feature(null,{Date:startDatePostmon.advance(year,'year'),Year:year,min_chla:multiStats1pos.get('chlor_a_min'),
+//                         max_chla:multiStats1pos.get('chlor_a_max'),min_poc:multiStats1pos.get('poc_min'),
+//                         max_poc:multiStats1pos.get('poc_max'), min_sst:multiStats1pos.get('sst_min'),
+//                         max_sst:multiStats1pos.get('sst_max'),mean_chla:multiStatspos.get('chlor_a_mean'),
+//                         std_chla:multiStatspos.get('chlor_a_stdDev'),mean_poc:multiStatspos.get('poc_mean'),
+//                         std_poc:multiStatspos.get('poc_stdDev'), mean_sst:multiStatspos.get('sst_mean'),
+//                         std_sst:multiStatspos.get('sst_stdDev'),corr_chlaVSsst:reducedpos.get('correlation'),
+//                         p_val_chlaVSsst:reducedpos.get('p-value'),corr_chlaVSpoc:reduced1pos.get('correlation'),
+//                         p_val_chlaVSpoc:reduced1pos.get('p-value')})
+
+// var featuree = ee.FeatureCollection(feature).merge(ee.FeatureCollection(featurepre))
+//               .merge(ee.FeatureCollection(featuremon)).merge(ee.FeatureCollection(featurepos))
+return ee.FeatureCollection(feature)
+}))
+
+print(features)
+
+Export.table.toDrive({
+  collection:features,
+  description:'Water_qaulity',
+  folder:'Water',
+  fileFormat:'CSV'
+});
+

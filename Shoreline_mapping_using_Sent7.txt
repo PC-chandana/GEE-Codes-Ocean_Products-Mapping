@@ -1,0 +1,172 @@
+// Define parameters
+var startDate = ee.Date('2006-01-01');
+var endDate = startDate.advance(1, 'year');
+var collection = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2')
+.filter(ee.Filter.date(startDate, endDate))
+.filter(ee.Filter.bounds(geometry));
+// Apply cloud mask
+var maskL8sr = function(image) {
+var qaMask = image.select('QA_PIXEL')
+.bitwiseAnd(parseInt('11111', 2)).eq(0);
+var saturationMask = image.select('QA_RADSAT').eq(0);
+// Apply the scaling factors to the appropriate bands.
+var opticalBands = image.select('SR_B.')
+.multiply(0.0000275).add(-0.2);
+var thermalBands = image.select('ST_B.*')
+.multiply(0.00341802).add(149.0);
+// Replace the original bands with the scaled ones
+// and apply the masks.
+return image.addBands(opticalBands, null, true)
+.addBands(thermalBands, null, true)
+.updateMask(qaMask)
+.updateMask(saturationMask);
+};
+var collection = collection.map(maskL8sr);
+// Select and Rename Bands
+var collection = collection.select(
+  ['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7'],
+  ['blue',  'green', 'red',   'nir',   'swir1', 'swir2']
+);
+// Create a median composite and clip
+var composite = collection.median().clip(geometry);
+var rgbVis = {
+bands: ['red', 'green', 'blue'],
+min: 0.0, 
+max: 0.3
+};
+Map.addLayer(composite, rgbVis, 'Composite Image');
+
+
+// Code to compute AWEI and detect water 
+// using Otsu thresholding
+var detectWater = function(image) {
+var awei = image.expression(
+'4 * (GREEN - SWIR1) - (0.25 * NIR + 2.75 * SWIR2)', {
+'GREEN': image.select('green'),
+'NIR': image.select('nir'),
+'SWIR1': image.select('swir1'),
+'SWIR2': image.select('swir2'),
+}).rename('awei');
+// Otsu Thresholding
+var thresholding = require(
+'users/gena/packages:thresholding');
+var scale = 100;
+var bounds = geometry;
+var cannyThreshold = 0.7;
+var cannySigma = 1;
+var minValue = -0.2;
+var th = thresholding.computeThresholdUsingOtsu(
+awei, scale, bounds, 
+cannyThreshold, cannySigma, minValue);
+// Create a Land-Water Image using Otsu Threshold
+// You can replace th with a manual threshold if
+// Otsu results are not satisfactory
+var water = awei.gt(th).rename('water');
+return water;
+};
+var water = detectWater(composite);
+var waterVis = {min:0, max:1, palette: ['white', 'blue']};
+Map.addLayer(water, waterVis, 'All Water');
+
+
+// Export resolution in meters is at which the coastline will
+// be vectorized.
+// Higher resolution (such as 10) will give smooother results
+var exportResolutionMeters = 30;
+// This function takes a binary Land-Water image and
+// removes inland water and small islands
+function removeInlandWaterAndIslands(waterImage) {
+// reduceConnectedComponents expects an interger image
+waterImage = waterImage.int();
+// Define neighborhood based on user parameters
+var connectedPixelsLand = ee.Number(500)
+.divide(exportResolutionMeters).int();
+var connectedPixelsWater = ee.Number(30)
+.divide(exportResolutionMeters).int();
+// Remove inland water
+var landFilled = waterImage.addBands(waterImage)
+.reduceConnectedComponents(
+ee.Reducer.median(), 'water', connectedPixelsLand)
+.unmask(99).eq(99).and(waterImage.neq(0));
+// Remove small islands
+var waterFilled = landFilled.addBands(landFilled)
+.reduceConnectedComponents(
+ee.Reducer.median(), 'water_1', connectedPixelsWater)
+.unmask(99).eq(99).and(landFilled.neq(1));
+// Land-Water Boundary
+return waterFilled;
+}
+var landWaterBoundary = removeInlandWaterAndIslands(water);
+var landWaterBoundaryVis = {
+min:0,
+max:1,
+palette: ['blue', 'white']
+};
+Map.addLayer(landWaterBoundary, landWaterBoundaryVis,
+'Land-Water Boundary (Raster)');
+
+
+// Convert the coastline image to vector
+var vectors = ee.Image(landWaterBoundary).selfMask()
+.reduceToVectors({
+geometry: geometry,
+scale: exportResolutionMeters,
+eightConnected: true,
+maxPixels: 1e10,
+tileScale: 16
+});
+Map.addLayer(vectors, {color: 'blue'},
+'Land-Water Boundary (Vector)');
+
+
+// This function takes vectorized polygons and 
+// extracts a polyline
+var simplifyAndExtractCoastline = function(vectors){
+// Simplify vectors
+var processedVectors = vectors.map(function(f) {
+var coords = f.geometry()
+.simplify({maxError: exportResolutionMeters})
+.coordinates();
+// Buffer the geometry by a pixel to avoid rasterizing
+// the boundary polygon
+var bufferDistance = ee.Number(
+exportResolutionMeters).multiply(-1);
+return f
+.setGeometry(
+ee.Geometry.MultiLineString(coords)
+.intersection(geometry.buffer(bufferDistance)));
+});
+return processedVectors;
+};
+var coastlineVector = simplifyAndExtractCoastline(
+vectors);
+Map.addLayer(coastlineVector, {color: 'red'},
+'Coastline (Vector)');
+
+
+// Exports
+// Exports can run for longer time and have more resources
+// If any of your layers time-out or give tile errors,
+// Run the exports instead
+Export.table.toDrive({
+collection: coastlineVector,
+description: 'Extracted_Coastline_Vector',
+folder: 'earthengine',
+fileNamePrefix: 'coastline',
+fileFormat: 'SHP'})
+Export.image.toDrive({
+image: landWaterBoundary,
+description: 'Extracted_Land_Water_boundary_Raster',
+folder: 'earthengine',
+fileNamePrefix: 'land_water_boundary_raster',
+region: geometry,
+scale: exportResolutionMeters,
+maxPixels: 1e10})
+Export.image.toDrive({
+image: composite,
+description: 'Composite',
+folder: 'earthengine',
+fileNamePrefix: 'composite',
+region: geometry,
+scale: exportResolutionMeters,
+maxPixels: 1e10})

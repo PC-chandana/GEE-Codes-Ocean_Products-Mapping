@@ -1,0 +1,42 @@
+//SST 
+
+var dataset = ee. ImageCollection("NASA/OCEANDATA/MODIS-Aqua/L3SMI")
+                  .filterDate('2016-01-01', '2016-01-31')
+                  .map(function(dataset){return dataset.clip(geometry)});
+var remoteSensingReflectance =
+    dataset.select(['sst']);
+var remotesansingReflactanceVis = {
+  min: -2,
+  max: 20,
+  palette: [ '040274', '040281', '0502a3', '0502b8', '0502ce', '0502e6',
+    '0602ff', '235cb1', '307ef3', '269db1', '30c8e2', '32d3ef',
+    '3be285', '3ff38f', '86e26f', '3ae237', 'b5e22e', 'd6e21f',
+    'fff705', 'ffd611', 'ffb613', 'ff6e08', 'ff500d',
+    'ff0000', 'de0101', 'c21301', 'a71001', '911003']
+};
+
+Map.centerObject(geometry, 7);
+Map.addLayer(
+    remoteSensingReflectance, remoteSensingReflectanceVis,
+    'SST 2016');
+
+//Chlorophyll-a
+var dataset = ee.ImageCollection('NASA/OCEANDATA/MODIS-Aqua/L3SMI')
+                  .filterDate('2016-01-01', '2016-01-31')
+                  .map(function(dataset){return dataset.clip(geometry)});
+var remoteSensingReflectance =
+    dataset.select(['chlor_a']);
+var remoteSensingReflectanceVis = {
+  min: 0,
+  max: 40,
+  
+  palette:['040274','040281','0502a3','0502b3','0502ce','0502e6',
+            '0602ff', '235cb1', '307ef3', '269db1', '30c8e2', '32d3ef',
+            '3be285', '3ff38f', '86e26f', '3ae237', 'b5e22e', 'd6e21f',
+            'fff705', 'de0101', 'c21301', 'a71001', '911003']
+};
+
+Map.centerObject(geometry, 7);
+Map.addLayer(
+    remoteSensingReflectance, remoteSensingReflectanceVis,
+    "Chlorophyll-a 2016");
